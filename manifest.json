@@ -3,6 +3,9 @@
         "github.com/gorilla/websocket": {
             "version": "v1.1.0"
         },
+        "go.uber.org/zap": {
+            "version": "v1.0.0-rc.2"
+        },
         "goji.io": {
             "version": "v2.0"
         },

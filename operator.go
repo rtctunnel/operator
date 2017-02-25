@@ -2,13 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/gorilla/websocket"
 	"goji.io/pat"
-	"golang.org/x/net/context"
 )
 
 var upgrader = websocket.Upgrader{
@@ -39,7 +39,8 @@ func (op *operator) run() {
 	for {
 		select {
 		case req := <-op.incoming:
-			log.Println("op::incoming", req)
+			log.Info("[operator] incoming",
+				zap.Any("request", req))
 			li, ok := routes[req.Destination]
 			if !ok {
 				li = &listener{
@@ -63,7 +64,8 @@ func (op *operator) run() {
 				}
 			}
 		case req := <-op.opened:
-			log.Println("op::opened", req)
+			log.Info("[operator] opened",
+				zap.Any("request", req))
 			existing, ok := routes[req.id]
 			if !ok {
 				existing = &listener{
@@ -73,7 +75,8 @@ func (op *operator) run() {
 			}
 			existing.out[req.out] = struct{}{}
 		case req := <-op.closed:
-			log.Println("op::closed", req)
+			log.Info("[operator] closed",
+				zap.Any("request", req))
 			if existing, ok := routes[req.id]; ok {
 				delete(existing.out, req.out)
 			}
@@ -82,8 +85,8 @@ func (op *operator) run() {
 	}
 }
 
-func (op *operator) webSocketOpen(ctx context.Context, w http.ResponseWriter, r *http.Request) {
-	id := pat.Param(ctx, "id")
+func (op *operator) webSocketOpen(w http.ResponseWriter, r *http.Request) {
+	id := pat.Param(r, "id")
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -105,7 +108,6 @@ func (op *operator) webSocketOpen(ctx context.Context, w http.ResponseWriter, r 
 	errs := make(chan error, 2)
 	go func() {
 		for payload := range c {
-			//log.Println("ws::send", payload)
 			err := conn.WriteJSON(payload)
 			if err != nil {
 				errs <- err
@@ -116,7 +118,6 @@ func (op *operator) webSocketOpen(ctx context.Context, w http.ResponseWriter, r 
 	go func() {
 		for {
 			mt, msg, err := conn.ReadMessage()
-			//log.Println("ws::recv", mt, string(msg), err)
 			if err != nil {
 				errs <- err
 				return
@@ -125,7 +126,9 @@ func (op *operator) webSocketOpen(ctx context.Context, w http.ResponseWriter, r 
 				var payload Payload
 				err = json.Unmarshal(msg, &payload)
 				if err != nil {
-					log.Println("invalid message:", string(msg))
+					log.Error("invalid message",
+						zap.String("message", string(msg)),
+						zap.Error(err))
 					continue
 				}
 				payload.Source = id

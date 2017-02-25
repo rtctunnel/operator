@@ -1,13 +1,14 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"net/http"
 	"os"
 
-	"goji.io/pat"
+	"go.uber.org/zap"
 
 	"goji.io"
+	"goji.io/pat"
 )
 
 func init() {
@@ -25,16 +26,29 @@ func init() {
 			h.ServeHTTP(w, r)
 		})
 	})
-	mux.HandleFuncC(pat.Get("/websocket-open/:id"), op.webSocketOpen)
+	mux.HandleFunc(pat.Get("/websocket-open/:id"), op.webSocketOpen)
 	http.Handle("/", mux)
 }
 
+var log *zap.Logger
+
 func main() {
+	var err error
+
+	log, err = zap.NewDevelopment()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create logger: %v", err)
+		os.Exit(1)
+	}
+
 	addr := os.Getenv("ADDR")
 	if addr == "" {
 		addr = "127.0.0.1:5000"
 	}
-	log.SetFlags(0)
-	log.Println("listening on", addr)
+	log.Info("config",
+		zap.String("ADDR", addr))
+
+	log.Info("starting listener",
+		zap.String("address", addr))
 	http.ListenAndServe(addr, nil)
 }
