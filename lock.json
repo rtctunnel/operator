@@ -1,0 +1,32 @@
+{
+    "memo": "98cc47d3e2204c884f3f247bcbe2f1eb0171e6b0823b2cbb7f84970c9fd0c939",
+    "projects": [
+        {
+            "name": "github.com/gorilla/websocket",
+            "version": "v1.1.0",
+            "revision": "3ab3a8b8831546bd18fd182c20687ca853b2bb13",
+            "packages": [
+                "."
+            ]
+        },
+        {
+            "name": "goji.io",
+            "version": "v2.0",
+            "revision": "0d89ff54b2c18c9c4ba530e32496aef902d3c6cd",
+            "packages": [
+                ".",
+                "internal",
+                "pat",
+                "pattern"
+            ]
+        },
+        {
+            "name": "golang.org/x/net",
+            "branch": "master",
+            "revision": "10c134ea0df15f7e34d789338c7a2d76cc7a3ab9",
+            "packages": [
+                "context"
+            ]
+        }
+    ]
+}
