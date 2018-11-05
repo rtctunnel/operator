@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"os"
 
 	"github.com/apex/log"
@@ -19,8 +20,17 @@ func main() {
 	addr := "localhost:8000"
 	rootCmd.PersistentFlags().StringVarP(&addr, "bind-addr", "", addr, "the address to bind")
 
-	err := runHTTP(addr)
+	li, err := net.Listen("tcp", addr)
 	if err != nil {
-		log.WithError(err).Fatal("failed to run http server")
+		log.WithField("bind-addr", addr).
+			WithError(err).
+			Fatal("failed to start listener")
+	}
+
+	err = runHTTP(li)
+	if err != nil {
+		log.WithField("bind-addr", addr).
+			WithError(err).
+			Fatal("failed to run http server")
 	}
 }

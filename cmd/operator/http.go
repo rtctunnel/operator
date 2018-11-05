@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"time"
 
@@ -14,14 +15,14 @@ const (
 	maxMessageSize = 10 * 1024
 )
 
-func runHTTP(addr string) error {
-	log.WithField("local-addr", addr).
+func runHTTP(li net.Listener) error {
+	log.WithField("bind-addr", li.Addr()).
 		Info("starting server")
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/pub", pub)
 	mux.HandleFunc("/sub", sub)
-	return http.ListenAndServe(addr, mux)
+	return http.Serve(li, mux)
 }
 
 var op = operator.New()
