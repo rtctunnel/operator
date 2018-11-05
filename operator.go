@@ -1,141 +1,217 @@
-package main
+package operator
 
 import (
-	"encoding/json"
-	"net/http"
-	"time"
-
-	"go.uber.org/zap"
-
-	"github.com/gorilla/websocket"
-	"goji.io/pat"
+	"context"
+	"sync"
 )
 
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+type opResult struct {
+	data string
+	err  error
+}
+type opWaiter struct {
+	addr string
+	ch   chan string
+}
+type op struct {
+	ctx    context.Context
+	addr   string
+	data   string
+	result chan opResult
 }
 
-type listener struct {
-	out map[chan Payload]struct{}
+// An Operator facilitates communication between two or more peers.
+type Operator struct {
+	pubc   chan op
+	unpubc chan opWaiter
+	subc   chan op
+	unsubc chan opWaiter
+
+	pendingPubs map[string]map[chan string]struct{}
+	pendingSubs map[string]map[chan string]struct{}
+
+	once   sync.Once
+	closer chan struct{}
 }
 
-type operator struct {
-	incoming chan Payload
-	opened   chan request
-	closed   chan request
+// New creates a new Operator.
+func New() *Operator {
+	o := &Operator{
+		pubc:   make(chan op),
+		unpubc: make(chan opWaiter),
+		subc:   make(chan op),
+		unsubc: make(chan opWaiter),
+
+		pendingPubs: make(map[string]map[chan string]struct{}),
+		pendingSubs: make(map[string]map[chan string]struct{}),
+
+		closer: make(chan struct{}),
+	}
+	go o.run()
+	return o
 }
 
-type request struct {
-	id  string
-	out chan Payload
+// Close closes the operator.
+func (o *Operator) Close() error {
+	o.once.Do(func() {
+		close(o.closer)
+	})
+	return nil
 }
 
-func (op *operator) run() {
-	routes := map[string]*listener{}
+// Pub publishes a message.
+func (o *Operator) Pub(ctx context.Context, addr, data string) error {
+	c := make(chan opResult, 1)
+	select {
+	case o.pubc <- op{ctx: ctx, addr: addr, data: data, result: c}:
+	case <-o.closer:
+		return context.Canceled
+	}
+
+	select {
+	case r := <-c:
+		return r.err
+	case <-o.closer:
+		return context.Canceled
+	}
+}
+
+// Sub subcribes to messages.
+func (o *Operator) Sub(ctx context.Context, addr string) (string, error) {
+	c := make(chan opResult, 1)
+	select {
+	case o.subc <- op{ctx: ctx, addr: addr, result: c}:
+	case <-o.closer:
+		return "", context.Canceled
+	}
+
+	select {
+	case r := <-c:
+		return r.data, r.err
+	case <-o.closer:
+		return "", context.Canceled
+	}
+}
+
+func (o *Operator) run() {
 	for {
 		select {
-		case req := <-op.incoming:
-			log.Info("[operator] incoming",
-				zap.Any("request", req))
-			li, ok := routes[req.Destination]
-			if !ok {
-				li = &listener{
-					out: map[chan Payload]struct{}{},
-				}
-				routes[req.Destination] = li
-			}
+		case op := <-o.pubc:
+			_ = o.pubNow(op.addr, op.data, op.result) || o.pubWait(op.ctx, op.addr, op.data, op.result)
+		case opw := <-o.unpubc:
+			_ = o.unpubNow(opw.addr, opw.ch)
 
-			for c := range li.out {
-				select {
-				case c <- req:
-				default:
-					select {
-					case <-c:
-					default:
-					}
-					select {
-					case c <- req:
-					default:
-					}
-				}
-			}
-		case req := <-op.opened:
-			log.Info("[operator] opened",
-				zap.Any("request", req))
-			existing, ok := routes[req.id]
-			if !ok {
-				existing = &listener{
-					out: map[chan Payload]struct{}{},
-				}
-				routes[req.id] = existing
-			}
-			existing.out[req.out] = struct{}{}
-		case req := <-op.closed:
-			log.Info("[operator] closed",
-				zap.Any("request", req))
-			if existing, ok := routes[req.id]; ok {
-				delete(existing.out, req.out)
-			}
-			close(req.out)
+		case op := <-o.subc:
+			_ = o.subNow(op.addr, op.result) || o.subWait(op.ctx, op.addr, op.result)
+		case opw := <-o.unsubc:
+			_ = o.unsubNow(opw)
+
+		case <-o.closer:
+			return
 		}
 	}
 }
 
-func (op *operator) webSocketOpen(w http.ResponseWriter, r *http.Request) {
-	id := pat.Param(r, "id")
-
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	defer conn.Close()
-
-	c := make(chan Payload, 8)
-	req := request{
-		id:  id,
-		out: c,
-	}
-	op.opened <- req
-	defer func() {
-		op.closed <- req
-	}()
-
-	errs := make(chan error, 2)
-	go func() {
-		for payload := range c {
-			err := conn.WriteJSON(payload)
-			if err != nil {
-				errs <- err
-				return
+func (o *Operator) pubNow(addr, data string, result chan opResult) bool {
+	scs, ok := o.pendingSubs[addr]
+	if ok {
+		for sc := range scs {
+			select {
+			case sc <- data:
+				result <- opResult{}
+				return true
+			default:
 			}
 		}
-	}()
+	}
+	return false
+}
+
+func (o *Operator) pubWait(ctx context.Context, addr, data string, result chan opResult) bool {
+	pcs, ok := o.pendingPubs[addr]
+	if !ok {
+		pcs = make(map[chan string]struct{})
+		o.pendingPubs[addr] = pcs
+	}
+
+	ch := make(chan string)
+	pcs[ch] = struct{}{}
 	go func() {
-		for {
-			mt, msg, err := conn.ReadMessage()
-			if err != nil {
-				errs <- err
-				return
-			}
-			if mt == websocket.BinaryMessage || mt == websocket.TextMessage {
-				var payload Payload
-				err = json.Unmarshal(msg, &payload)
-				if err != nil {
-					log.Error("invalid message",
-						zap.String("message", string(msg)),
-						zap.Error(err))
-					continue
-				}
-				payload.Source = id
-				payload.Time = time.Now()
-				op.incoming <- payload
-			}
+		select {
+		case <-ctx.Done():
+			result <- opResult{err: ctx.Err()}
+		case ch <- data:
+			result <- opResult{}
+		}
+
+		select {
+		case o.unpubc <- opWaiter{addr: addr, ch: ch}:
+		case <-o.closer:
 		}
 	}()
-	<-errs
+
+	return true
+}
+
+func (o *Operator) unpubNow(addr string, c chan string) bool {
+	cs, ok := o.pendingPubs[addr]
+	if ok {
+		delete(cs, c)
+		if len(cs) == 0 {
+			delete(o.pendingPubs, addr)
+		}
+	}
+	return true
+}
+
+func (o *Operator) subNow(addr string, result chan opResult) bool {
+	cs, ok := o.pendingPubs[addr]
+	if ok {
+		for c := range cs {
+			select {
+			case data := <-c:
+				result <- opResult{data: data}
+				return true
+			default:
+			}
+		}
+	}
+	return false
+}
+
+func (o *Operator) subWait(ctx context.Context, addr string, result chan opResult) bool {
+	cs, ok := o.pendingSubs[addr]
+	if !ok {
+		cs = make(map[chan string]struct{})
+		o.pendingSubs[addr] = cs
+	}
+
+	c := make(chan string)
+	cs[c] = struct{}{}
+	go func() {
+		select {
+		case <-ctx.Done():
+			result <- opResult{err: ctx.Err()}
+		case data := <-c:
+			result <- opResult{data: data}
+		}
+
+		select {
+		case o.unsubc <- opWaiter{addr: addr, ch: c}:
+		case <-o.closer:
+		}
+	}()
+
+	return true
+}
+
+func (o *Operator) unsubNow(opw opWaiter) bool {
+	cs, ok := o.pendingSubs[opw.addr]
+	if ok {
+		delete(cs, opw.ch)
+		if len(cs) == 0 {
+			delete(o.pendingSubs, opw.addr)
+		}
+	}
+	return true
 }
