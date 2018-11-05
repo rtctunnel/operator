@@ -11,8 +11,9 @@ import (
 	"github.com/rtctunnel/operator"
 )
 
-const (
+var (
 	maxMessageSize = 10 * 1024
+	timeout        = time.Second * 30
 )
 
 func runHTTP(li net.Listener) error {
@@ -43,7 +44,7 @@ func pub(w http.ResponseWriter, r *http.Request) {
 		WithField("data", data).
 		Info("pub")
 
-	ctx, cancel := context.WithTimeout(r.Context(), time.Second*30)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	err := op.Pub(ctx, addr, data)
@@ -61,7 +62,7 @@ func sub(w http.ResponseWriter, r *http.Request) {
 		WithField("addr", addr).
 		Info("sub")
 
-	ctx, cancel := context.WithTimeout(r.Context(), time.Second*30)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	data, err := op.Sub(ctx, addr)
