@@ -27,8 +27,8 @@ type Operator struct {
 	subc   chan op
 	unsubc chan opWaiter
 
-	pendingPubs map[string]map[chan string]struct{}
-	pendingSubs map[string]map[chan string]struct{}
+	pendingPubs ChannelCollection
+	pendingSubs ChannelCollection
 
 	once   sync.Once
 	closer chan struct{}
@@ -42,8 +42,8 @@ func New() *Operator {
 		subc:   make(chan op),
 		unsubc: make(chan opWaiter),
 
-		pendingPubs: make(map[string]map[chan string]struct{}),
-		pendingSubs: make(map[string]map[chan string]struct{}),
+		pendingPubs: make(ChannelCollection),
+		pendingSubs: make(ChannelCollection),
 
 		closer: make(chan struct{}),
 	}
@@ -113,39 +113,31 @@ func (o *Operator) run() {
 }
 
 func (o *Operator) pubNow(addr, data string, result chan opResult) bool {
-	scs, ok := o.pendingSubs[addr]
-	if ok {
-		for sc := range scs {
-			select {
-			case sc <- data:
-				result <- opResult{}
-				return true
-			default:
-			}
+	for _, c := range o.pendingSubs.List(addr) {
+		select {
+		case c <- data:
+			result <- opResult{}
+			return true
+		default:
 		}
 	}
 	return false
 }
 
 func (o *Operator) pubWait(ctx context.Context, addr, data string, result chan opResult) bool {
-	pcs, ok := o.pendingPubs[addr]
-	if !ok {
-		pcs = make(map[chan string]struct{})
-		o.pendingPubs[addr] = pcs
-	}
+	c := make(chan string)
+	o.pendingPubs.Add(addr, c)
 
-	ch := make(chan string)
-	pcs[ch] = struct{}{}
 	go func() {
 		select {
 		case <-ctx.Done():
 			result <- opResult{err: ctx.Err()}
-		case ch <- data:
+		case c <- data:
 			result <- opResult{}
 		}
 
 		select {
-		case o.unpubc <- opWaiter{addr: addr, ch: ch}:
+		case o.unpubc <- opWaiter{addr: addr, ch: c}:
 		case <-o.closer:
 		}
 	}()
@@ -154,40 +146,25 @@ func (o *Operator) pubWait(ctx context.Context, addr, data string, result chan o
 }
 
 func (o *Operator) unpubNow(addr string, c chan string) bool {
-	cs, ok := o.pendingPubs[addr]
-	if ok {
-		delete(cs, c)
-		if len(cs) == 0 {
-			delete(o.pendingPubs, addr)
-		}
-	}
+	o.pendingPubs.Remove(addr, c)
 	return true
 }
 
 func (o *Operator) subNow(addr string, result chan opResult) bool {
-	cs, ok := o.pendingPubs[addr]
-	if ok {
-		for c := range cs {
-			select {
-			case data := <-c:
-				result <- opResult{data: data}
-				return true
-			default:
-			}
+	for _, c := range o.pendingPubs.List(addr) {
+		select {
+		case data := <-c:
+			result <- opResult{data: data}
+			return true
+		default:
 		}
 	}
 	return false
 }
 
 func (o *Operator) subWait(ctx context.Context, addr string, result chan opResult) bool {
-	cs, ok := o.pendingSubs[addr]
-	if !ok {
-		cs = make(map[chan string]struct{})
-		o.pendingSubs[addr] = cs
-	}
-
 	c := make(chan string)
-	cs[c] = struct{}{}
+	o.pendingSubs.Add(addr, c)
 	go func() {
 		select {
 		case <-ctx.Done():
@@ -206,12 +183,6 @@ func (o *Operator) subWait(ctx context.Context, addr string, result chan opResul
 }
 
 func (o *Operator) unsubNow(opw opWaiter) bool {
-	cs, ok := o.pendingSubs[opw.addr]
-	if ok {
-		delete(cs, opw.ch)
-		if len(cs) == 0 {
-			delete(o.pendingSubs, opw.addr)
-		}
-	}
+	o.pendingSubs.Remove(opw.addr, opw.ch)
 	return true
 }
