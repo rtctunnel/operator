@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/apex/log"
+    "github.com/rs/cors"
 	"github.com/rtctunnel/operator"
 )
 
@@ -23,7 +24,9 @@ func runHTTP(li net.Listener) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/pub", pub)
 	mux.HandleFunc("/sub", sub)
-	return http.Serve(li, mux)
+
+	handler := cors.Default().Handler(mux)
+	return http.Serve(li, handler)
 }
 
 var op = operator.New()
