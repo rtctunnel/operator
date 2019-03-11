@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/apex/log"
-    "github.com/rs/cors"
+	"github.com/rs/cors"
 	"github.com/rtctunnel/operator"
 )
 
 var (
-	maxMessageSize = 10 * 1024
+	maxMessageSize = 128 * 1024
 	timeout        = time.Second * 30
 )
 
