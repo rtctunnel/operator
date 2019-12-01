@@ -10,6 +10,7 @@ import (
 	"github.com/apex/log"
 	"github.com/rs/cors"
 	"github.com/rtctunnel/operator"
+	"github.com/heptiolabs/healthcheck"
 )
 
 var (
@@ -21,9 +22,12 @@ func runHTTP(li net.Listener) error {
 	log.WithField("bind-addr", li.Addr()).
 		Info("starting server")
 
+	health := healthcheck.NewHandler()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/pub", pub)
 	mux.HandleFunc("/sub", sub)
+	mux.HandleFunc("/healthz", health.ReadyEndpoint)
 
 	handler := cors.Default().Handler(mux)
 	return http.Serve(li, handler)
