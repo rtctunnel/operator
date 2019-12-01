@@ -9,4 +9,6 @@ jobs:
         run: docker build --tag operator:latest .
       - name: Release
         run: |
-          echo "${{github.ref}}"
+          docker login -u="rtctunnel+github" -p="$DOCKER_PASSWORD" quay.io
+          docker tag operator:latest quay.io/rtctunnel/operator:"$(basename "$GITHUB_REF")"
+          docker push quay.io/rtctunnel/operator:"$(basename "$GITHUB_REF")"
