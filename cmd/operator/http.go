@@ -41,7 +41,9 @@ func runHTTP(li net.Listener) error {
 		_, _ = w.Write([]byte("RTCTunnel Operator"))
 	})
 	r.Get("/pub", pub)
+	r.Post("/pub", pub)
 	r.Get("/sub", sub)
+	r.Post("/sub", sub)
 	r.Get("/healthz", health.ReadyEndpoint)
 
 	return http.Serve(li, r)
