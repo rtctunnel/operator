@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/apex/log"
-	"github.com/rs/cors"
-	"github.com/rtctunnel/operator"
+	"github.com/go-chi/chi"
+	"github.com/go-chi/cors"
 	"github.com/heptiolabs/healthcheck"
+	"github.com/rtctunnel/operator"
 )
 
 var (
@@ -24,13 +25,26 @@ func runHTTP(li net.Listener) error {
 
 	health := healthcheck.NewHandler()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/pub", pub)
-	mux.HandleFunc("/sub", sub)
-	mux.HandleFunc("/healthz", health.ReadyEndpoint)
+	r := chi.NewRouter()
 
-	handler := cors.Default().Handler(mux)
-	return http.Serve(li, handler)
+	cors := cors.New(cors.Options{
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{"GET", "POST", "PUT"},
+	})
+	r.Use(cors.Handler)
+
+	r.Head("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("RTCTunnel Operator"))
+	})
+	r.Get("/pub", pub)
+	r.Get("/sub", sub)
+	r.Get("/healthz", health.ReadyEndpoint)
+
+	return http.Serve(li, r)
 }
 
 var op = operator.New()

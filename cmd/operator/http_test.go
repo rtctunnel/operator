@@ -87,6 +87,33 @@ func TestHTTPTimeout(t *testing.T) {
 	}
 }
 
+func TestHead(t *testing.T) {
+	li := startTestServer(t)
+	defer li.Close()
+
+	req, err := http.NewRequest("HEAD", fmt.Sprintf("http://%s", li.Addr()), nil)
+	assert.NoError(t, err)
+
+	res, err := http.DefaultClient.Do(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, res.StatusCode)
+}
+
+func TestHTTPCORS(t *testing.T) {
+	li := startTestServer(t)
+	defer li.Close()
+
+	req, err := http.NewRequest("OPTIONS", fmt.Sprintf("http://%s", li.Addr()), nil)
+	assert.NoError(t, err)
+	req.Header.Add("Origin", "https://www.example.com")
+	req.Header.Add("Access-Control-Request-Method", "PUT")
+
+	res, err := http.DefaultClient.Do(req)
+	assert.NoError(t, err)
+	assert.Equal(t, 200, res.StatusCode)
+	assert.Equal(t, "PUT", res.Header.Get("Access-Control-Allow-Methods"))
+}
+
 func startTestServer(t *testing.T) net.Listener {
 	li, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
