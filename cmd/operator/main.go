@@ -12,13 +12,16 @@ import (
 func main() {
 	log.SetHandler(text.New(os.Stderr))
 
-	addr := "localhost:8000"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8000"
+	}
+	addr := "localhost:" + port
 
 	rootCmd := &cobra.Command{
 		Use:   "operator",
 		Short: "Operator facilitates WebRTC signaling",
 		Run: func(cmd *cobra.Command, args []string) {
-
 			li, err := net.Listen("tcp", addr)
 			if err != nil {
 				log.WithField("bind-addr", addr).
