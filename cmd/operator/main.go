@@ -16,7 +16,7 @@ func main() {
 	if port == "" {
 		port = "8000"
 	}
-	addr := "localhost:" + port
+	addr := "0.0.0.0:" + port
 
 	rootCmd := &cobra.Command{
 		Use:   "operator",
