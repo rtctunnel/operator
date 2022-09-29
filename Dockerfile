@@ -9,6 +9,7 @@ COPY go.sum .
 RUN go mod download
 
 COPY . .
+RUN git config --global --add safe.directory /go/src/github.com/rtctunnel/operator
 RUN go build -v -ldflags '-extldflags "-static"' \
     -o /bin/operator ./cmd/operator
 
