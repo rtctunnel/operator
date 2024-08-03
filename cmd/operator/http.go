@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"crypto/tls"
 	"github.com/apex/log"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -19,14 +20,11 @@ var (
 	timeout        = time.Second * 30
 )
 
-func runHTTP(addr, key, cert string) error {
+func runHTTP(addr string, tlsCfg *tls.Config) error {
 	log.WithField("bind-addr", addr).
-		WithField("key", key).
-		WithField("cert", cert).
 		Info("starting server")
 
 	health := healthcheck.NewHandler()
-	useHttps := len(key) != 0 && len(cert) != 0
 
 	gin.SetMode(gin.ReleaseMode)
 	gins := gin.New()
@@ -48,31 +46,22 @@ func runHTTP(addr, key, cert string) error {
 	gins.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"*"},
 		AllowMethods: []string{"GET", "POST", "PUT"},
-		// AllowHeaders:     []string{"Origin"},
-		// ExposeHeaders:    []string{"Content-Length"},
-		// AllowCredentials: true,
-		// AllowOriginFunc: func(origin string) bool {
-		//   return origin == "https://github.com"
-		// },
 		MaxAge: 1 * time.Minute,
 	}))
 
-	var err error
-	if useHttps {
-		err = gins.RunTLS(
-			addr,
-			cert,
-			key)
-	} else {
-		err = gins.Run(addr)
+	server := http.Server{
+		Addr:      addr,
+		Handler:   gins,
+		TLSConfig: tlsCfg,
 	}
+
+	err := server.ListenAndServeTLS("", "")
 
 	if errors.Is(err, http.ErrServerClosed) {
 	} else if err != nil {
 		return err
 	}
 	return nil
-
 }
 
 var op = operator.New()

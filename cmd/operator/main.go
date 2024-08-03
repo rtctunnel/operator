@@ -23,7 +23,14 @@ func main() {
 		Use:   "operator",
 		Short: "Operator facilitates WebRTC signaling",
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := runHTTP(addr, key, cert); err != nil {
+
+			tlsConfig, err := httpsSettings(key, cert)
+			if err != nil {
+				println("failed to load tls config:", err.Error())
+				os.Exit(1)
+			}
+
+			if err := runHTTP(addr, tlsConfig); err != nil {
 				log.WithField("bind-addr", addr).
 					WithError(err).
 					Fatal("failed to run http server")
