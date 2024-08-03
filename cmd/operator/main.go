@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net"
 	"os"
 
 	"github.com/apex/log"
@@ -17,20 +16,14 @@ func main() {
 		port = "8000"
 	}
 	addr := "0.0.0.0:" + port
+	key := ""
+	cert := ""
 
 	rootCmd := &cobra.Command{
 		Use:   "operator",
 		Short: "Operator facilitates WebRTC signaling",
 		Run: func(cmd *cobra.Command, args []string) {
-			li, err := net.Listen("tcp", addr)
-			if err != nil {
-				log.WithField("bind-addr", addr).
-					WithError(err).
-					Fatal("failed to start listener")
-			}
-
-			err = runHTTP(li)
-			if err != nil {
+			if err := runHTTP(addr, key, cert); err != nil {
 				log.WithField("bind-addr", addr).
 					WithError(err).
 					Fatal("failed to run http server")
@@ -38,6 +31,8 @@ func main() {
 		},
 	}
 	rootCmd.PersistentFlags().StringVarP(&addr, "bind-addr", "", addr, "the address to bind")
+	rootCmd.PersistentFlags().StringVarP(&key, "key", "", key, "path to key file")
+	rootCmd.PersistentFlags().StringVarP(&cert, "cert", "", cert, "path to cert file")
 
 	err := rootCmd.Execute()
 	if err != nil {

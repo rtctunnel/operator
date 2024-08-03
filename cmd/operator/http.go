@@ -2,14 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/apex/log"
-	"github.com/go-chi/chi"
-	"github.com/go-chi/cors"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 	"github.com/heptiolabs/healthcheck"
 	"github.com/rtctunnel/operator"
 )
@@ -19,80 +19,93 @@ var (
 	timeout        = time.Second * 30
 )
 
-func runHTTP(li net.Listener) error {
-	log.WithField("bind-addr", li.Addr()).
+func runHTTP(addr, key, cert string) error {
+	log.WithField("bind-addr", addr).
+		WithField("key", key).
+		WithField("cert", cert).
 		Info("starting server")
 
 	health := healthcheck.NewHandler()
+	useHttps := len(key) != 0 && len(cert) != 0
 
-	r := chi.NewRouter()
+	gin.SetMode(gin.ReleaseMode)
+	gins := gin.New()
 
-	cors := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
-		AllowedMethods: []string{"GET", "POST", "PUT"},
+	gins.GET("/", func(c *gin.Context) {
+		c.Writer.Header().Set("Content-Type", "text/plain")
+		_, _ = c.Writer.Write([]byte("RTCTunnel Operator"))
 	})
-	r.Use(cors.Handler)
 
-	r.Head("/", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-	})
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		_, _ = w.Write([]byte("RTCTunnel Operator"))
-	})
-	r.Get("/pub", pub)
-	r.Post("/pub", pub)
-	r.Get("/sub", sub)
-	r.Post("/sub", sub)
-	r.Get("/healthz", health.ReadyEndpoint)
+	gins.POST("/pub", pub)
+	gins.GET("/pub", pub)
+	gins.POST("/sub", sub)
+	gins.GET("/sub", sub)
+	gins.GET("/healthz",
+		func(c *gin.Context) {
+			health.ReadyEndpoint(c.Writer, c.Request)
+		})
 
-	return http.Serve(li, r)
+	gins.Use(cors.New(cors.Config{
+		AllowOrigins: []string{"*"},
+		AllowMethods: []string{"GET", "POST", "PUT"},
+		// AllowHeaders:     []string{"Origin"},
+		// ExposeHeaders:    []string{"Content-Length"},
+		// AllowCredentials: true,
+		// AllowOriginFunc: func(origin string) bool {
+		//   return origin == "https://github.com"
+		// },
+		MaxAge: 1 * time.Minute,
+	}))
+
+	var err error
+	if useHttps {
+		err = gins.RunTLS(
+			addr,
+			cert,
+			key)
+	} else {
+		err = gins.Run(addr)
+	}
+
+	if errors.Is(err, http.ErrServerClosed) {
+	} else if err != nil {
+		return err
+	}
+	return nil
+
 }
 
 var op = operator.New()
 
-func pub(w http.ResponseWriter, r *http.Request) {
-	addr := r.FormValue("address")
-	data := r.FormValue("data")
+func pub(c *gin.Context) {
+	addr := c.Request.FormValue("address")
+	data := c.Request.FormValue("data")
 	if len(data) > maxMessageSize {
-		log.WithField("remote-addr", r.RemoteAddr).
+		log.WithField("remote-addr", c.Request.RemoteAddr).
 			WithField("addr", addr).
 			Warn("data too large")
-		http.Error(w, "data too large", http.StatusBadRequest)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message": "data too large",
+		})
 		return
-	}
-
-	log.WithField("remote-addr", r.RemoteAddr).
-		WithField("addr", addr).
-		WithField("data", data).
-		Info("pub")
-
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-
-	err := op.Pub(ctx, addr, data)
-	if err == nil {
-		w.WriteHeader(http.StatusOK)
-	} else {
-		w.WriteHeader(http.StatusGatewayTimeout)
 	}
 }
 
-func sub(w http.ResponseWriter, r *http.Request) {
-	addr := r.FormValue("address")
+func sub(c *gin.Context) {
+	addr := c.Request.FormValue("address")
 
-	log.WithField("remote-addr", r.RemoteAddr).
+	log.WithField("remote-addr", c.Request.RemoteAddr).
 		WithField("addr", addr).
 		Info("sub")
 
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 	defer cancel()
 
 	data, err := op.Sub(ctx, addr)
 	if err == nil {
-		w.Header().Set("Content-Type", "text/plain")
-		io.WriteString(w, data)
+		c.Writer.Header().Set("Content-Type", "text/plain")
+		io.WriteString(c.Writer, data)
 	} else {
-		w.WriteHeader(http.StatusGatewayTimeout)
+		c.Writer.WriteHeader(http.StatusGatewayTimeout)
 	}
 }
